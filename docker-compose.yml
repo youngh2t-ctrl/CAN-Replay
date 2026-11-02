@@ -1,0 +1,15 @@
+services:
+  can-replay:
+    build: .
+    image: can-replay:latest
+    container_name: can-replay
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./server-data:/data
+    environment:
+      CAN_REPLAY_MAX_UPLOAD_MB: "200"
+      CAN_REPLAY_IDLE_MIN: "30"
+      CAN_REPLAY_MAX_LOADED: "20"
+      CAN_REPLAY_KEEP_DAYS: "30"
+    restart: unless-stopped

@@ -1,0 +1,189 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CAN 报文离线回放</title>
+  <link rel="stylesheet" href="/static/vendor/uPlot.min.css" />
+  <link rel="stylesheet" href="/static/app.css?v=29" />
+</head>
+<body>
+  <div class="err" id="err"></div>
+  <div class="chart-hover-tip" id="chartHoverTip"></div>
+  <div class="toast" id="toast"></div>
+
+  <header class="topbar" id="topbar">
+    <span class="topbar-viewport" id="topbarViewport"></span>
+    <span class="topbar-cursor" id="topbarCursor">A: —</span>
+    <span class="topbar-measure" id="topbarMeasure">Δt: —</span>
+    <button type="button" class="btn sm btn-ghost" id="btnFitCurrentX" title="当前图适配 X">当前X</button>
+    <button type="button" class="btn sm btn-ghost" id="btnFitCurrentY" title="当前图适配 Y">当前Y</button>
+    <button type="button" class="btn sm btn-ghost" id="btnFitCurrentXY" title="当前图适配 XY">当前XY</button>
+    <button type="button" class="btn sm btn-ghost" id="btnOverviewAll" title="全图一键全览">全览</button>
+    <label class="chart-h-ctrl" title="全局图表高度 30–150px">
+      <span>图高</span>
+      <input type="range" id="chartHeightRange" min="30" max="150" step="1" value="80" />
+      <span id="chartHeightVal">80px</span>
+    </label>
+    <button type="button" class="btn sm btn-ghost" id="btnMeasure" title="标尺：点击曲线放置 A/B 游标测量时间差">标尺</button>
+    <button type="button" class="btn sm btn-ghost" id="btnClearCursor" title="清除 X 游标与标尺">清除游标</button>
+    <button type="button" class="btn sm" id="btnTogglePoints">采样点</button>
+    <button type="button" class="btn sm btn-ghost" id="btnCalc" title="用已选信号做加减乘除等计算，生成虚拟信号">计算</button>
+    <button type="button" class="btn sm btn-ghost" id="btnStats" title="显示/隐藏统计面板">统计</button>
+    <button type="button" class="btn sm" id="btnBusLoad" title="总线负载率查询">负载率查询</button>
+  </header>
+
+  <div id="calc-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" id="calcBackdrop"></div>
+    <div class="modal-panel calc-panel" role="dialog" aria-labelledby="calcTitle">
+      <div class="modal-h">
+        <strong id="calcTitle">信号计算（虚拟信号）</strong>
+        <button type="button" class="btn sm btn-ghost" id="btnCalcClose">关闭</button>
+      </div>
+      <div class="calc-body">
+        <div class="calc-col">
+          <div class="calc-sub">1. 勾选参与计算的信号（按勾选顺序编号 A、B、C…，点字母可插入表达式）</div>
+          <div id="calcSignalList" class="calc-sig-list"></div>
+        </div>
+        <div class="calc-col">
+          <div class="calc-sub">2. 填写表达式</div>
+          <div class="calc-form">
+            <label>名称<input type="text" id="calcName" placeholder="如 电池功率" /></label>
+            <label>单位<input type="text" id="calcUnit" placeholder="可选，如 kW" /></label>
+            <label class="calc-expr-label">表达式<input type="text" id="calcExpr" placeholder="如 A * B / 1000、(A + B) / 2、A - B" autocomplete="off" spellcheck="false" /></label>
+          </div>
+          <div class="calc-funcs" id="calcFuncs"></div>
+          <div class="calc-help">
+            运算符：<code>+ - * / ** %</code>　比较：<code>&gt; &lt; &gt;= &lt;= == !=</code>（结果 1/0）　逻辑：<code>&amp; |</code><br />
+            <code>diff(A)</code> 变化率/秒　<code>integ(A)</code> 积分（×秒）　<code>mavg(A, 10)</code> 最近 10 点滑动平均　<code>where(A &gt; 0, A, 0)</code> 条件取值　<code>t</code> 日志起点起的秒数<br />
+            不同周期的信号按「零阶保持」对齐：合并所有时间点，某信号没有新值时沿用上一个值；只计算各信号都有数据的时间段。
+          </div>
+          <div class="calc-actions">
+            <button type="button" class="btn sm btn-ghost" id="btnCalcPreview">校验</button>
+            <button type="button" class="btn sm" id="btnCalcSave">添加并显示</button>
+            <button type="button" class="btn sm btn-ghost" id="btnCalcReset">新建</button>
+          </div>
+          <div class="calc-preview" id="calcPreview"></div>
+        </div>
+      </div>
+      <div class="calc-sub">已定义的虚拟信号</div>
+      <div id="calcDefList" class="calc-def-list"></div>
+    </div>
+  </div>
+
+  <div id="group-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" id="groupBackdrop"></div>
+    <div class="modal-panel" role="dialog" aria-labelledby="groupTitle">
+      <div class="modal-h">
+        <strong id="groupTitle">信号组管理</strong>
+        <div class="modal-h-actions">
+          <button type="button" class="btn sm btn-ghost" id="btnGroupExport">导出</button>
+          <label class="btn sm btn-ghost">导入<input type="file" id="groupImportFile" accept=".json" hidden /></label>
+          <button type="button" class="btn sm btn-ghost" id="btnGroupClose">关闭</button>
+        </div>
+      </div>
+      <div class="meta">载入 = 替换当前已选信号；追加 = 并入当前已选；更新 = 用当前已选信号覆盖该组。名称可直接修改，回车保存。</div>
+      <div id="groupManageList" class="grp-list"></div>
+    </div>
+  </div>
+
+  <div id="busload-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" id="busloadBackdrop"></div>
+    <div class="modal-panel" role="dialog" aria-labelledby="busloadTitle">
+      <div class="modal-h">
+        <strong id="busloadTitle">总线负载率查询</strong>
+        <button type="button" class="btn sm btn-ghost" id="btnBusLoadClose">关闭</button>
+      </div>
+      <div class="busload-cfg">
+        <label>波特率
+          <select id="busloadBitrate">
+            <option value="125000">125000</option>
+            <option value="250000">250000</option>
+            <option value="500000" selected>500000</option>
+            <option value="1000000">1000000</option>
+          </select>
+        </label>
+        <label>时段(s)
+          <input type="number" id="busloadWindow" value="1" min="0" step="0.1" title="0=整段" />
+        </label>
+        <label>填充位
+          <select id="busloadStuff">
+            <option value="estimate" selected>estimate</option>
+            <option value="none">none</option>
+            <option value="max">max</option>
+          </select>
+        </label>
+        <button type="button" class="btn sm" id="btnBusLoadRun">查询</button>
+      </div>
+      <div class="busload-summary meta" id="busloadSummary">加载日志后点击查询</div>
+      <div class="busload-tree" id="busloadTree"></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="picker-rail">
+      <button type="button" class="picker-toggle" id="btnPicker">信号库</button>
+      <aside id="picker-panel">
+        <div class="picker-h">
+          <div class="picker-actions">
+            <label class="btn sm">日志<input type="file" id="logFile" accept=".asc,.blf" hidden /></label>
+            <label class="btn sm" title="可一次选择多个 DBC">导入DBC<input type="file" id="dbcFile" accept=".dbc" multiple hidden /></label>
+          </div>
+          <div class="dbc-switch-row">
+            <label class="dbc-switch-label">当前DBC</label>
+            <select id="dbcSelect" class="dbc-select" title="快速切换已导入的 DBC">
+              <option value="">未导入</option>
+            </select>
+            <button type="button" class="btn sm btn-ghost" id="btnRemoveDbc" title="移除当前 DBC">移除</button>
+          </div>
+          <span class="meta" id="meta"></span>
+          信号浏览器
+          <input type="search" id="pickerFilter" placeholder="搜索 ECU / 报文 / 信号 / 中文注释..." />
+        </div>
+        <div id="picker-tree"><span class="meta">加载 DBC 后搜索并勾选</span></div>
+      </aside>
+    </div>
+
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-h">
+        <div>已选信号</div>
+        <div class="group-bar">
+          <select id="groupSelect" class="group-select" title="选择信号组即替换当前已选信号">
+            <option value="">— 信号组 —</option>
+          </select>
+          <button type="button" class="btn sm btn-ghost" id="btnGroupSave" title="把当前已选信号保存为信号组">保存为组</button>
+          <button type="button" class="btn sm btn-ghost" id="btnGroupManage" title="重命名、追加、删除、导入导出">管理</button>
+        </div>
+      </div>
+      <div id="selected-list"><span class="meta">从信号库勾选</span></div>
+      <div class="sidebar-resize" id="sidebarResize"></div>
+    </aside>
+
+    <div class="content">
+      <div id="views-area">
+        <div class="empty">从信号库勾选信号后在此显示曲线</div>
+      </div>
+      <div id="time-ruler" class="time-ruler hidden">
+        <div class="tr-track" id="timeRulerTrack">
+          <div class="tr-ticks" id="timeRulerTicks"></div>
+          <span class="tr-hover" id="timeRulerHover"></span>
+        </div>
+      </div>
+      <div id="stats-panel" class="stats-panel hidden">
+        <div class="stats-h">
+          <strong>统计</strong>
+          <label><input type="radio" name="statsRange" value="view" checked /> 当前视口</label>
+          <label><input type="radio" name="statsRange" value="ab" /> 标尺 A–B</label>
+          <span class="stats-range-text" id="statsRangeText"></span>
+          <button type="button" class="btn sm btn-ghost" id="btnStatsCopy" title="复制为表格，可粘贴到 Excel">复制</button>
+          <button type="button" class="btn-remove" id="btnStatsClose" title="关闭">×</button>
+        </div>
+        <div class="stats-table-wrap"><table id="statsTable" class="stats-table"></table></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/vendor/uPlot.iife.min.js"></script>
+  <script src="/static/app.js?v=29"></script>
+</body>
+</html>
